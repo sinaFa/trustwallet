@@ -1,0 +1,14 @@
+# secrets
+.env
+
+# go
+bin/
+
+# pipeline output: the simulated data lake and logs are runtime state
+data/
+logs/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/

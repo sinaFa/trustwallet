@@ -1,0 +1,43 @@
+# Prometheus alert rules: two signals that cover most failure modes, and one
+# that needs a person rather than a restart. Load via rule_files in
+# prometheus.yml. The README's metrics section explains what each underlying
+# metric answers. Owner: the team running the service; set the label to a real
+# routing key before loading.
+groups:
+  - name: etl
+    rules:
+      - alert: EtlPipelineStale
+        # 90 s is three poll intervals, the same window ETL_READINESS_MAX_AGE
+        # defaults to; change both together. absent() covers a service that
+        # has never succeeded, whose gauge does not exist yet.
+        expr: >
+          (time() - etl_last_success_timestamp_seconds{stage="export"} > 90)
+          or absent(etl_last_success_timestamp_seconds{stage="export"})
+        labels:
+          severity: page
+          owner: data-platform
+        annotations:
+          summary: "No fully successful ETL cycle in 90 s (three polls), or none yet"
+          boundary: "fetch, load or export; compare the three stage gauges to find the first broken one"
+          action: "check logs/etl.log for the failing stage; restart is safe, the stable key and the checkpoint make replays no-ops"
+      - alert: EtlCoverageDrop
+        expr: increase(etl_coverage_drops_total[10m]) > 0
+        labels:
+          severity: warn
+          owner: data-platform
+        annotations:
+          summary: "Symbols priced in a previous poll are missing now"
+          boundary: "source coverage; requests succeed, the response content shrank"
+          action: "compare etl_assets_priced against recent values; if the source delisted assets, refresh the registry snapshot and the symbol map"
+      - alert: EtlUnverifiedSymbols
+        # Steady above zero means a new listing is waiting for a review; the
+        # pipeline is healthy and the symbol is simply not priced yet.
+        expr: etl_symbols_unverified > 0
+        for: 10m
+        labels:
+          severity: warn
+          owner: data-platform
+        annotations:
+          summary: "Binance trades a registry symbol that reference/symbol_map.csv has no row for"
+          boundary: "reference data, not the pipeline; the symbol is not priced until reviewed"
+          action: "check the exchange's pair against the registry asset and add the row, bound to its asset id or excluded with the reason"

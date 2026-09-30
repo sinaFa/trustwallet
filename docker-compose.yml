@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: etl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-etl}
+      POSTGRES_DB: etl
+    # Host port is configurable because a local Postgres often already owns 5432.
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U etl -d etl"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  etl:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://etl:${POSTGRES_PASSWORD:-etl}@postgres:5432/etl?sslmode=disable
+      ETL_POLL_INTERVAL: ${ETL_POLL_INTERVAL:-30s}
+      ETL_QUOTE_ASSET: ${ETL_QUOTE_ASSET:-USDT}
+    ports:
+      - "${ETL_PORT:-8080}:8080"
+    # Bind mounts simulate persistent storage: files survive container restarts
+    # and are readable from the host at ./data and ./logs.
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    # On stop the service finishes the run in flight (ETL_DRAIN_TIMEOUT, 20 s)
+    # before exiting; Docker must not SIGKILL it first.
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
